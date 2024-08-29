@@ -43,11 +43,9 @@ export const PopUp: FC<{ children: JSX.Element; closeEvent: () => void; show: bo
     >
       <div
         onClick={e => {
-          e.preventDefault();
           e.stopPropagation();
         }}
         onMouseDown={e => {
-          e.preventDefault();
           e.stopPropagation();
         }}
         onMouseUp={e => {

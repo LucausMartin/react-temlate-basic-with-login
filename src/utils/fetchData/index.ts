@@ -76,20 +76,22 @@ async function fetchData<Data, Params>(
         }
       });
       const responseJson = await response.json();
+      // 如果返回的数据中有 code 字段，说明是后端返回的自定义字段
       if (responseJson.code) {
         return responseJson;
       }
-      if (!isSuccess(responseJson.statusCode)) {
-        console.log(1);
+      // 如果返回的数据中有 statusCode 字段，说明是后端返回的自动返回的错误
+      if (responseJson.statusCode) {
+        // 如果是未授权，说明 token 过期，需要刷新 token
         if (responseJson.statusCode === HTTP_STATUS.UNAUTHORIZED) {
-          console.log(2);
           await localforage.removeItem('access_token');
           const refresh_token = await localforage.getItem<string>('refresh_token');
-          console.log(3, refresh_token);
+          // 如果没有 refresh token，说明用户未登录
           if (!refresh_token) {
             store.dispatch(ready());
             throw new Error('no refresh token');
           }
+          // 有 refresh token，尝试刷新 token
           try {
             const newAccessToken = await fetch(`${SERVER_URL}/users/refresh-token`, {
               method: 'GET',
@@ -99,12 +101,13 @@ async function fetchData<Data, Params>(
               }
             });
             const newAccessTokenJson = await newAccessToken.json();
-            console.log(newAccessTokenJson);
             if (newAccessTokenJson.code === HTTP_STATUS.OK) {
-              console.log(4);
-              await localforage.setItem('access_token', newAccessTokenJson.data.accessToken);
+              // 刷新 token 成功，更新 token
+              await localforage.setItem('access_token', newAccessTokenJson.data.access_token);
+              await localforage.setItem('refresh_token', newAccessTokenJson.data.refresh_token);
               return fetchData(method, options);
             } else {
+              // 刷新 token 失败，删除 token，返回登录页
               await localforage.removeItem('refresh_token');
               store.dispatch(ready());
               throw new Error(newAccessTokenJson.message);
@@ -138,10 +141,48 @@ async function fetchData<Data, Params>(
         body: headers && headers['Content-Type'] === '' ? (params as FormData) : JSON.stringify(params)
       });
       const responseJson = await response.json();
-      if (!isSuccess(responseJson.statusCode)) {
+      // 如果返回的数据中有 code 字段，说明是后端返回的自定义字段
+      if (responseJson.code) {
+        return responseJson;
+      }
+      // 如果返回的数据中没有 code 字段，说明是后端返回自动返回的错误
+      if (responseJson.statusCode) {
+        // 如果是未授权，说明 token 过期，需要刷新 token
+        if (responseJson.statusCode === HTTP_STATUS.UNAUTHORIZED) {
+          await localforage.removeItem('access_token');
+          const refresh_token = await localforage.getItem<string>('refresh_token');
+          // 如果没有 refresh token，说明用户未登录
+          if (!refresh_token) {
+            store.dispatch(ready());
+            throw new Error('no refresh token');
+          }
+          // 有 refresh token，尝试刷新 token
+          try {
+            const newAccessToken = await fetch(`${SERVER_URL}/users/refresh-token`, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: refresh_token ? `Bearer ${refresh_token}` : ''
+              }
+            });
+            const newAccessTokenJson = await newAccessToken.json();
+            if (newAccessTokenJson.code === HTTP_STATUS.OK) {
+              // 刷新 token 成功，更新 token
+              await localforage.setItem('access_token', newAccessTokenJson.data.access_token);
+              await localforage.setItem('refresh_token', newAccessTokenJson.data.refresh_token);
+              return fetchData(method, options, params);
+            } else {
+              // 刷新 token 失败，删除 token，返回登录页
+              await localforage.removeItem('refresh_token');
+              store.dispatch(ready());
+              throw new Error(newAccessTokenJson.message);
+            }
+          } catch {
+            throw new Error('refresh token error');
+          }
+        }
         throw new Error(responseJson.message);
       }
-      return responseJson;
     } catch (err) {
       if (err instanceof Error) {
         throw new Error(err.message);
